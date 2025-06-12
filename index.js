@@ -272,37 +272,53 @@ async function initializeServices() {
   }
 }
 
-process.on("SIGTERM", () => {
-  console.log("SIGTERM received, shutting down gracefully");
-  process.exit(0);
-});
+initializeServices()
+  .then(() => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Music App Backend running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log(`📡 Server listening on: http://0.0.0.0:${PORT}`);
+      console.log(`📚 Documentation at: http://0.0.0.0:${PORT}/api-docs`);
+      console.log(`❤️ Health check at: http://0.0.0.0:${PORT}/health`);
+      console.log(`⏰ Started at: ${new Date().toISOString()}`);
+    });
 
-process.on("SIGINT", () => {
-  console.log("SIGINT received, shutting down gracefully");
-  process.exit(0);
-});
+    // Manejo de errores del servidor
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
+      } else {
+        console.error('❌ Server error:', error);
+      }
+      process.exit(1);
+    });
 
+    // Graceful shutdown
+    const gracefulShutdown = (signal) => {
+      console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
+      server.close(() => {
+        console.log('✅ Server closed successfully');
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  })
+  .catch((error) => {
+    console.error("❌ Failed to start server:", error);
+    console.error("Stack trace:", error.stack);
+    process.exit(1);
+  });
+
+// Manejo global de errores no capturados
 process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error);
+  console.error("💥 Uncaught Exception:", error);
+  console.error("Stack trace:", error.stack);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  console.error("🚫 Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);
 });
-
-initializeServices()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Music App Backend running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
-      console.log(`API available at: http://localhost:${PORT}`);
-      console.log(`Documentation at: http://localhost:${PORT}/api-docs`);
-      console.log(`Health check at: http://localhost:${PORT}/health`);
-    });
-  })
-  .catch((error) => {
-    console.error("Failed to start server:", error);
-    process.exit(1);
-  });

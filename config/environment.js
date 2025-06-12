@@ -51,7 +51,7 @@ export const ENV_CONFIG = {
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
   
   // Puerto
-  PORT: process.env.PORT || 3000,
+  PORT: process.env.PORT || 8080,
   
   // Debug
   DEBUG: process.env.DEBUG === 'true' || isDevelopment
