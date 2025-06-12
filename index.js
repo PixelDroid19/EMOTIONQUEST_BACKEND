@@ -27,26 +27,55 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 function validateEnvironment() {
-  const requiredVariables = [
+  console.log("🔍 Validando variables de entorno...");
+  
+  // Variables críticas que DEBEN estar presentes
+  const criticalVariables = [
     "SPOTIFY_CLIENT_ID",
     "SPOTIFY_CLIENT_SECRET",
-    "FRONTEND_URL",
-    "MONGODB_URI", // Ejemplo, agrega tus variables de base de datos
   ];
 
-  const missingVariables = requiredVariables.filter(
+  // Variables opcionales pero recomendadas
+  const optionalVariables = [
+    "FRONTEND_URL",
+    "MONGODB_URI",
+    "GOOGLE_API_KEY"
+  ];
+
+  const missingCritical = criticalVariables.filter(
     (variable) => !process.env[variable]
   );
 
-  if (missingVariables.length > 0) {
+  const missingOptional = optionalVariables.filter(
+    (variable) => !process.env[variable]
+  );
+
+  // Log de todas las variables para debugging
+  console.log("📋 Estado de variables de entorno:");
+  [...criticalVariables, ...optionalVariables].forEach(variable => {
+    const value = process.env[variable];
+    console.log(`  ${variable}: ${value ? '✅ configurada' : '❌ faltante'}`);
+  });
+
+  // Solo fallar si faltan variables críticas
+  if (missingCritical.length > 0) {
     console.error(
-      "Error: Las siguientes variables de entorno no están definidas:",
-      missingVariables.join(", ")
+      "❌ Error: Las siguientes variables CRÍTICAS no están definidas:",
+      missingCritical.join(", ")
     );
     process.exit(1);
   }
 
-  console.log("✅ Variables de entorno validadas.");
+  // Advertir sobre variables opcionales faltantes
+  if (missingOptional.length > 0) {
+    console.warn(
+      "⚠️ Advertencia: Las siguientes variables OPCIONALES no están definidas:",
+      missingOptional.join(", ")
+    );
+    console.warn("La aplicación funcionará con funcionalidad limitada.");
+  }
+
+  console.log("✅ Variables de entorno críticas validadas.");
 }
 
 validateEnvironment();
@@ -107,6 +136,18 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// Health check básico (antes de inicialización de servicios)
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: RESPONSE_STATUS?.SUCCESS || "ok",
+    message: "Servidor funcionando correctamente",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    env: process.env.NODE_ENV || "development",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 function setupRoutes() {
   app.get("/", (req, res) => {
     res.json({
@@ -125,7 +166,7 @@ function setupRoutes() {
 
   app.get("/health", (req, res) => {
     res.json({
-      status: RESPONSE_STATUS.SUCCESS,
+      status: RESPONSE_STATUS?.SUCCESS || "ok",
       message: "Servidor funcionando correctamente",
       uptime: process.uptime(),
       memory: process.memoryUsage(),
@@ -249,26 +290,52 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 async function initializeServices() {
+  console.log("🔧 Inicializando servicios...");
+  
   try {
+    // Cargar constantes (crítico)
+    console.log("📦 Cargando constantes...");
     const { RESPONSE_STATUS: ResponseStatus } = await import(
       "./config/constants.js"
     );
-    const { initializeDatabase: initDB } = await import("./config/database.js");
-
     RESPONSE_STATUS = ResponseStatus;
-    initializeDatabase = initDB;
+    console.log("✅ Constantes cargadas");
 
+    // Configurar rutas (crítico)
+    console.log("🛣️ Configurando rutas...");
     setupRoutes();
+    console.log("✅ Rutas configuradas");
 
-    const { youtubeMusicService } = await import(
-      "./services/youtubeMusicService.js"
-    );
-    await youtubeMusicService.initialize();
+    // Inicializar servicios opcionales
+    try {
+      console.log("🎵 Inicializando YouTube Music Service...");
+      const { youtubeMusicService } = await import(
+        "./services/youtubeMusicService.js"
+      );
+      await youtubeMusicService.initialize();
+      console.log("✅ YouTube Music Service inicializado");
+    } catch (error) {
+      console.warn("⚠️ YouTube Music Service no pudo inicializarse:", error.message);
+      console.warn("La aplicación funcionará sin este servicio");
+    }
 
-    await initializeDatabase();
+    // Inicializar base de datos (opcional)
+    try {
+      console.log("🗄️ Inicializando base de datos...");
+      const { initializeDatabase: initDB } = await import("./config/database.js");
+      initializeDatabase = initDB;
+      await initializeDatabase();
+      console.log("✅ Base de datos inicializada");
+    } catch (error) {
+      console.warn("⚠️ Base de datos no pudo inicializarse:", error.message);
+      console.warn("La aplicación funcionará sin persistencia de datos");
+    }
+
+    console.log("🎉 Inicialización de servicios completada");
   } catch (error) {
-    console.error("Error initializing services:", error);
-    process.exit(1);
+    console.error("❌ Error crítico inicializando servicios:", error);
+    console.error("Stack trace:", error.stack);
+    throw error; // Re-lanzar solo errores críticos
   }
 }
 
