@@ -1,8 +1,9 @@
 import { generateClassicalPlaylist, generateFallbackClassicalPlaylist } from "../services/aiService.js";
 import { youtubeMusicService } from "../services/youtubeMusicService.js";
 import { searchMultipleSpotifyTracks, getSpotifyUserProfile, createSpotifyPlaylist, addTracksToSpotifyPlaylist } from "../services/spotifyService.js";
-import { store } from "../config/database.js";
+import { store, database } from "../config/database.js";
 import { RESPONSE_STATUS, ERROR_MESSAGES, DEFAULT_PLAYLIST_CONFIG } from "../config/constants.js";
+import Playlist from "../models/Playlist.js";
 import crypto from "crypto";
 
 /**
@@ -110,6 +111,48 @@ export async function getPlaylist(req, res) {
 
     // 6. Almacenar en cache
     store.storePlaylist(playlistId, finalPlaylist);
+
+    // 6.5. Guardar en MongoDB si está disponible
+    let savedToDatabase = false;
+    if (database.isReady()) {
+      try {
+        const playlistToSave = new Playlist({
+          title: finalPlaylist.title,
+          description: finalPlaylist.description,
+          emotion: detectEmotion(userDescription), // Función helper para detectar emoción
+          language: language,
+          songs: finalPlaylist.songs.map(song => ({
+            title: song.title,
+            artist: song.artist,
+            duration: song.duration,
+            videoId: song.videoId,
+            playbackUrl: song.playbackUrl,
+            thumbnails: song.thumbnails,
+            originalTitle: song.originalTitle,
+            originalArtist: song.originalArtist,
+            spotifyUri: null // Se puede actualizar después
+          })),
+          originalSongsCount: finalPlaylist.originalSongsCount,
+          userId: null, // Se asignará cuando el usuario se loguee
+          sessionId: req.headers['x-session-id'] || null, // Para usuarios no logueados
+          generatedWith: spotifyPlaylistData ? 'spotify_validated' : 'ai_only',
+          spotifyPlaylistId: spotifyPlaylistData?.id || null,
+          spotifyPlaylistUrl: spotifyPlaylistData?.url || null,
+          spotifyCreatedAt: spotifyPlaylistData ? new Date() : null
+        });
+
+        await playlistToSave.save();
+        savedToDatabase = true;
+        
+        // Actualizar el ID para que coincida con MongoDB
+        finalPlaylist.mongoId = playlistToSave._id.toString();
+        
+        console.log(`💾 Playlist guardada en MongoDB: ${playlistToSave._id}`);
+      } catch (dbError) {
+        console.error('Error guardando en MongoDB:', dbError.message);
+        // No interrumpir el flujo, solo logguear
+      }
+    }
 
     // 7. Determinar status de la respuesta
     const responseStatus = foundYTSongs.length === playlistData.songs.length ? RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.PARTIAL;
@@ -247,4 +290,31 @@ export async function getSystemStats(req, res) {
       error: process.env.NODE_ENV === "development" ? error.message : undefined
     });
   }
+}
+
+/**
+ * Función helper para detectar la emoción basada en la descripción del usuario
+ */
+function detectEmotion(userDescription) {
+  const description = userDescription.toLowerCase();
+  
+  // Patrones de palabras clave para cada emoción
+  const emotionPatterns = {
+    angry: ['enojado', 'angry', 'furioso', 'rabia', 'ira', 'molesto', 'agresivo', 'irritado'],
+    happy: ['feliz', 'happy', 'alegre', 'contento', 'eufórico', 'celebrar', 'fiesta', 'diversión', 'joy'],
+    sleep: ['dormir', 'sleep', 'relajar', 'calma', 'tranquilo', 'descanso', 'paz', 'meditation', 'chill'],
+    magic: ['mágico', 'magic', 'místico', 'fantástico', 'épico', 'aventura', 'maravilla', 'encanto'],
+    sad: ['triste', 'sad', 'melancólico', 'llorar', 'deprimido', 'nostalgia', 'pena', 'dolor'],
+    party: ['fiesta', 'party', 'bailar', 'dance', 'celebración', 'energético', 'activo', 'upbeat']
+  };
+  
+  // Buscar matches en la descripción
+  for (const [emotion, keywords] of Object.entries(emotionPatterns)) {
+    if (keywords.some(keyword => description.includes(keyword))) {
+      return emotion;
+    }
+  }
+  
+  // Si no encuentra match, retornar 'other'
+  return 'other';
 } 

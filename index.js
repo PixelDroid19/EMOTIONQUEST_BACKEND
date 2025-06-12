@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
 import dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 
 // Importar rutas
 import playlistRoutes from "./routes/playlistRoutes.js";
@@ -21,6 +22,9 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 // Importar constantes y configuración
 import { RESPONSE_STATUS } from "./config/constants.js";
+
+// Importar configuración de base de datos
+import { initializeDatabase } from "./config/database.js";
 
 // Cargar variables de entorno
 dotenv.config();
@@ -42,17 +46,14 @@ app.use(compression());
 
 // CORS configurado
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(",").map((url) => url.trim())
-    : [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173/callback",
-        "http://127.0.0.1:5173",
-      ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  origin: [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    process.env.FRONTEND_URL
+  ].filter(Boolean),
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 };
 
 app.use(cors(corsOptions));
@@ -80,6 +81,17 @@ if (process.env.NODE_ENV === "production") {
 
 // Rate limiting general
 app.use(generalLimiter);
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100,
+  message: {
+    status: "error",
+    message: "Demasiadas solicitudes. Intenta de nuevo en 15 minutos."
+  }
+});
+app.use(limiter);
 
 // ===== RUTAS DE SALUD Y INFO =====
 
@@ -243,6 +255,10 @@ async function initializeServices() {
       "./services/youtubeMusicService.js"
     );
     await youtubeMusicService.initialize();
+
+    // Inicializar base de datos
+    console.log("🔄 Inicializando base de datos...");
+    await initializeDatabase();
 
     console.log("✅ All services initialized successfully");
   } catch (error) {

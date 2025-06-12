@@ -3,109 +3,203 @@
  * En producción, esto debería ser reemplazado por una base de datos real
  */
 
-class InMemoryStore {
+import mongoose from 'mongoose';
+
+// Store para caché de playlists y búsquedas de YouTube Music en memoria
+class PlaylistStore {
   constructor() {
     this.playlists = new Map();
-    this.searchCache = new Map();
-    this.maxCacheSize = 1000;
-    this.cacheExpiry = 30 * 60 * 1000; // 30 minutos
+    this.searchResults = new Map(); // Cache para búsquedas de YouTube Music
+    this.EXPIRATION_TIME = 24 * 60 * 60 * 1000; // 24 horas
+    this.SEARCH_EXPIRATION_TIME = 4 * 60 * 60 * 1000; // 4 horas para búsquedas
   }
 
-  // Cache de playlists generadas
-  storePlaylist(id, playlistData) {
-    this.playlists.set(id, {
+  generateId() {
+    return `playlist_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  storePlaylist(playlistData) {
+    const id = this.generateId();
+    const playlist = {
+      id,
       ...playlistData,
-      createdAt: Date.now(),
-      id
-    });
+      timestamp: Date.now()
+    };
     
-    // Limpiar cache si es muy grande
-    if (this.playlists.size > this.maxCacheSize) {
-      const oldestKey = this.playlists.keys().next().value;
-      this.playlists.delete(oldestKey);
-    }
+    this.playlists.set(id, playlist);
+    console.log(`📀 Playlist cached with ID: ${id}`);
+    
+    // Limpiar playlists expiradas
+    this.cleanExpiredPlaylists();
+    
+    return playlist;
   }
 
   getPlaylist(id) {
     const playlist = this.playlists.get(id);
     if (!playlist) return null;
-
-    // Verificar si no ha expirado
-    if (Date.now() - playlist.createdAt > this.cacheExpiry) {
+    
+    // Verificar si ha expirado
+    if (Date.now() - playlist.timestamp > this.EXPIRATION_TIME) {
       this.playlists.delete(id);
       return null;
     }
-
+    
     return playlist;
   }
 
-  // Cache de búsquedas de YouTube Music
+  cleanExpiredPlaylists() {
+    const now = Date.now();
+    for (const [id, playlist] of this.playlists.entries()) {
+      if (now - playlist.timestamp > this.EXPIRATION_TIME) {
+        this.playlists.delete(id);
+      }
+    }
+  }
+
+  getAllPlaylists() {
+    this.cleanExpiredPlaylists();
+    return Array.from(this.playlists.values());
+  }
+
+  getStats() {
+    this.cleanExpiredPlaylists();
+    this.cleanExpiredSearchResults();
+    return {
+      totalPlaylists: this.playlists.size,
+      totalSearchResults: this.searchResults.size,
+      oldestPlaylist: this.playlists.size > 0 ? 
+        Math.min(...Array.from(this.playlists.values()).map(p => p.timestamp)) : null,
+      oldestSearchResult: this.searchResults.size > 0 ?
+        Math.min(...Array.from(this.searchResults.values()).map(r => r.timestamp)) : null
+    };
+  }
+
+  // Métodos para caché de búsquedas de YouTube Music
   storeSearchResult(query, result) {
-    const key = this.normalizeQuery(query);
-    this.searchCache.set(key, {
+    const searchEntry = {
+      query,
       result,
       timestamp: Date.now()
-    });
-
-    // Limpiar cache si es muy grande
-    if (this.searchCache.size > this.maxCacheSize) {
-      const oldestKey = this.searchCache.keys().next().value;
-      this.searchCache.delete(oldestKey);
-    }
+    };
+    
+    this.searchResults.set(query, searchEntry);
+    console.log(`🔍 Search result cached for: "${query}"`);
+    
+    // Limpiar búsquedas expiradas
+    this.cleanExpiredSearchResults();
   }
 
   getSearchResult(query) {
-    const key = this.normalizeQuery(query);
-    const cached = this.searchCache.get(key);
+    const searchEntry = this.searchResults.get(query);
+    if (!searchEntry) return null;
     
-    if (!cached) return null;
-
-    // Cache de búsquedas expira más rápido (10 minutos)
-    if (Date.now() - cached.timestamp > 10 * 60 * 1000) {
-      this.searchCache.delete(key);
+    // Verificar si ha expirado
+    if (Date.now() - searchEntry.timestamp > this.SEARCH_EXPIRATION_TIME) {
+      this.searchResults.delete(query);
       return null;
     }
-
-    return cached.result;
-  }
-
-  normalizeQuery(query) {
-    return query.toLowerCase().trim().replace(/\s+/g, ' ');
-  }
-
-  // Limpiar cache expirado
-  cleanup() {
-    const now = Date.now();
     
-    // Limpiar playlists expiradas
-    for (const [key, value] of this.playlists.entries()) {
-      if (now - value.createdAt > this.cacheExpiry) {
-        this.playlists.delete(key);
-      }
-    }
+    return searchEntry.result;
+  }
 
-    // Limpiar búsquedas expiradas
-    for (const [key, value] of this.searchCache.entries()) {
-      if (now - value.timestamp > 10 * 60 * 1000) {
-        this.searchCache.delete(key);
+  cleanExpiredSearchResults() {
+    const now = Date.now();
+    for (const [query, searchEntry] of this.searchResults.entries()) {
+      if (now - searchEntry.timestamp > this.SEARCH_EXPIRATION_TIME) {
+        this.searchResults.delete(query);
       }
     }
   }
 
-  // Estadísticas del cache
-  getStats() {
-    return {
-      playlistsCount: this.playlists.size,
-      searchCacheCount: this.searchCache.size,
-      maxCacheSize: this.maxCacheSize
-    };
+  // Limpiar todos los caches
+  clearAllCaches() {
+    this.playlists.clear();
+    this.searchResults.clear();
+    console.log('🧹 Todos los caches limpiados');
   }
 }
 
-// Singleton instance
-export const store = new InMemoryStore();
+// Configuración de MongoDB
+class DatabaseConnection {
+  constructor() {
+    this.isConnected = false;
+  }
 
-// Ejecutar limpieza cada 5 minutos
-setInterval(() => {
-  store.cleanup();
-}, 5 * 60 * 1000); 
+  async connect() {
+    try {
+      if (this.isConnected) {
+        console.log('📦 MongoDB ya está conectado');
+        return;
+      }
+
+      const mongoUri = process.env.MONGODB_URI;
+      if (!mongoUri) {
+        console.warn('⚠️ MONGODB_URI no está configurado. Funcionando solo con caché en memoria.');
+        return;
+      }
+
+      console.log('🔗 Conectando a MongoDB...');
+      console.log(`📍 URI: ${mongoUri.replace(/:[^:@]*@/, ':***@')}`); // Ocultar password en logs
+
+      await mongoose.connect(mongoUri, {
+        serverSelectionTimeoutMS: 5000, // 5 segundos
+        maxPoolSize: 10,
+        retryWrites: true,
+        w: 'majority',
+        dbName: 'emotionquest' // Especificar explícitamente el nombre de la base de datos
+      });
+
+      this.isConnected = true;
+      console.log('🎯 MongoDB conectado exitosamente');
+      console.log(`🏛️ Base de datos activa: ${mongoose.connection.db.databaseName}`);
+      console.log(`🌐 Host: ${mongoose.connection.host}:${mongoose.connection.port}`);
+
+      // Eventos de conexión
+      mongoose.connection.on('error', (error) => {
+        console.error('❌ Error de MongoDB:', error);
+        this.isConnected = false;
+      });
+
+      mongoose.connection.on('disconnected', () => {
+        console.warn('⚠️ MongoDB desconectado');
+        this.isConnected = false;
+      });
+
+      mongoose.connection.on('reconnected', () => {
+        console.log('🔄 MongoDB reconectado');
+        this.isConnected = true;
+      });
+
+    } catch (error) {
+      console.error('❌ Error conectando a MongoDB:', error.message);
+      console.log('📦 Continuando con caché en memoria solamente');
+      this.isConnected = false;
+    }
+  }
+
+  async disconnect() {
+    try {
+      if (this.isConnected) {
+        await mongoose.disconnect();
+        this.isConnected = false;
+        console.log('📦 MongoDB desconectado');
+      }
+    } catch (error) {
+      console.error('❌ Error desconectando MongoDB:', error);
+    }
+  }
+
+  isReady() {
+    return this.isConnected && mongoose.connection.readyState === 1;
+  }
+}
+
+// Instancias exportadas
+export const store = new PlaylistStore();
+export const database = new DatabaseConnection();
+
+// Función para inicializar la base de datos
+export const initializeDatabase = async () => {
+  await database.connect();
+}; 
