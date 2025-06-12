@@ -1,6 +1,7 @@
 import axios from "axios";
 import crypto from "crypto";
 import querystring from "querystring";
+import ENV_CONFIG from "../config/environment.js";
 
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
@@ -22,16 +23,22 @@ function generateRandomString(length) {
 // Inicia el flujo de autorización (redirección a Spotify)
 export const initiateLogin = async (req, res) => {
   try {
-    const clientId = process.env.SPOTIFY_CLIENT_ID;
+    const clientId = ENV_CONFIG.SPOTIFY_CLIENT_ID;
     if (!clientId) {
       return res.status(500).json({
         error: "SPOTIFY_CLIENT_ID no está configurado en el servidor",
       });
     }
 
-    // Usar una URL base fija con 127.0.0.1 como exige Spotify para desarrollo local
-    const backendUrl = process.env.BACKEND_URL || "http://127.0.0.1:3000";
-    const redirect_uri = `${backendUrl}/api/spotify/callback`;
+    const redirect_uri = `${ENV_CONFIG.BACKEND_URL}/api/spotify/callback`;
+
+    // Log para debugging
+    console.log('🎵 Spotify Auth - Iniciando login:', {
+      environment: ENV_CONFIG.NODE_ENV,
+      backendUrl: ENV_CONFIG.BACKEND_URL,
+      redirect_uri,
+      clientId: clientId ? 'configured' : 'missing'
+    });
 
     const state = generateRandomString(16);
 
@@ -79,10 +86,8 @@ export const initiateLogin = async (req, res) => {
     console.error("Error iniciando autenticación con Spotify:", error);
     // Evitar enviar una respuesta JSON aquí. Si la redirección falla,
     // es mejor redirigir a una página de error del frontend.
-    const frontendErrorUrl =
-      process.env.FRONTEND_URL || "http://localhost:5173";
     res.redirect(
-      `${frontendErrorUrl}/auth-error?error=login_initiation_failed`
+      `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=login_initiation_failed`
     );
   }
 };
@@ -91,20 +96,25 @@ export const initiateLogin = async (req, res) => {
 export const handleCallback = async (req, res) => {
   const { code, state, error } = req.query;
 
-  // URL base del frontend para redirecciones
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  console.log('🎵 Spotify Auth - Callback:', {
+    environment: ENV_CONFIG.NODE_ENV,
+    frontendUrl: ENV_CONFIG.FRONTEND_URL,
+    hasCode: !!code,
+    hasState: !!state,
+    hasError: !!error
+  });
 
   try {
     if (error) {
       console.error("Error en autorización de Spotify:", error);
       return res.redirect(
-        `${frontendUrl}/auth-error?error=${encodeURIComponent(error)}`
+        `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=${encodeURIComponent(error)}`
       );
     }
 
     if (!state || !stateStore.has(state)) {
       console.error("Estado inválido o expirado:", state);
-      return res.redirect(`${frontendUrl}/auth-error?error=invalid_state`);
+      return res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-error?error=invalid_state`);
     }
 
     const { redirect_uri } = stateStore.get(state);
@@ -112,16 +122,16 @@ export const handleCallback = async (req, res) => {
 
     if (!code) {
       console.error("Código de autorización faltante");
-      return res.redirect(`${frontendUrl}/auth-error?error=missing_code`);
+      return res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-error?error=missing_code`);
     }
 
-    const clientId = process.env.SPOTIFY_CLIENT_ID;
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+    const clientId = ENV_CONFIG.SPOTIFY_CLIENT_ID;
+    const clientSecret = ENV_CONFIG.SPOTIFY_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
       console.error("Credenciales de Spotify no configuradas");
       return res.redirect(
-        `${frontendUrl}/auth-error?error=server_configuration`
+        `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=server_configuration`
       );
     }
 
@@ -160,7 +170,7 @@ export const handleCallback = async (req, res) => {
     };
 
     const tokenString = encodeURIComponent(JSON.stringify(tokenData));
-    res.redirect(`${frontendUrl}/auth-success#data=${tokenString}`);
+    res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-success#data=${tokenString}`);
   } catch (err) {
     console.error("Error procesando callback de Spotify:", err.response ? err.response.data : err.message);
 
@@ -170,7 +180,7 @@ export const handleCallback = async (req, res) => {
     }
 
     res.redirect(
-      `${frontendUrl}/auth-error?error=${encodeURIComponent(errorMessage)}`
+      `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=${encodeURIComponent(errorMessage)}`
     );
   }
 };
@@ -186,8 +196,8 @@ export const refreshAccessToken = async (req, res) => {
       });
     }
 
-    const clientId = process.env.SPOTIFY_CLIENT_ID;
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+    const clientId = ENV_CONFIG.SPOTIFY_CLIENT_ID;
+    const clientSecret = ENV_CONFIG.SPOTIFY_CLIENT_SECRET;
     
     if (!clientId || !clientSecret) {
       return res.status(500).json({

@@ -1,8 +1,20 @@
-import { generateClassicalPlaylist, generateFallbackClassicalPlaylist } from "../services/aiService.js";
+import {
+  generateClassicalPlaylist,
+  generateFallbackClassicalPlaylist,
+} from "../services/aiService.js";
 import { youtubeMusicService } from "../services/youtubeMusicService.js";
-import { searchMultipleSpotifyTracks, getSpotifyUserProfile, createSpotifyPlaylist, addTracksToSpotifyPlaylist } from "../services/spotifyService.js";
+import {
+  searchMultipleSpotifyTracks,
+  getSpotifyUserProfile,
+  createSpotifyPlaylist,
+  addTracksToSpotifyPlaylist,
+} from "../services/spotifyService.js";
 import { store, database } from "../config/database.js";
-import { RESPONSE_STATUS, ERROR_MESSAGES, DEFAULT_PLAYLIST_CONFIG } from "../config/constants.js";
+import {
+  RESPONSE_STATUS,
+  ERROR_MESSAGES,
+  DEFAULT_PLAYLIST_CONFIG,
+} from "../config/constants.js";
 import Playlist from "../models/Playlist.js";
 import crypto from "crypto";
 
@@ -13,18 +25,26 @@ import crypto from "crypto";
  */
 export async function getPlaylist(req, res) {
   try {
-    const { userDescription, language = DEFAULT_PLAYLIST_CONFIG.DEFAULT_LANGUAGE, spotifyAccessToken } = req.body;
+    const {
+      userDescription,
+      language = DEFAULT_PLAYLIST_CONFIG.DEFAULT_LANGUAGE,
+      spotifyAccessToken,
+    } = req.body;
 
     if (!userDescription || userDescription.trim().length === 0) {
       return res.status(400).json({
         status: RESPONSE_STATUS.ERROR,
-        message: ERROR_MESSAGES.MISSING_DESCRIPTION
+        message: ERROR_MESSAGES.MISSING_DESCRIPTION,
       });
     }
 
-    console.log(`🎵 Processing playlist request: "${userDescription}", Language: ${language}`);
+    console.log(
+      `🎵 Processing playlist request: "${userDescription}", Language: ${language}`
+    );
     if (spotifyAccessToken) {
-      console.log("🔒 Spotify token provided, will attempt to create playlist.");
+      console.log(
+        "🔒 Spotify token provided, will attempt to create playlist."
+      );
     }
 
     // 1. Generar ID único para esta playlist
@@ -33,21 +53,33 @@ export async function getPlaylist(req, res) {
     // 2. La IA genera la lista de canciones
     let playlistData;
     try {
-      playlistData = await generateClassicalPlaylist(userDescription.trim(), language);
+      playlistData = await generateClassicalPlaylist(
+        userDescription.trim(),
+        language
+      );
     } catch (aiError) {
       console.error("AI generation failed, trying fallback:", aiError);
-      playlistData = await generateFallbackClassicalPlaylist(userDescription.trim(), language);
+      playlistData = await generateFallbackClassicalPlaylist(
+        userDescription.trim(),
+        language
+      );
     }
 
     // 3. Enriquecer con videoIds de YouTube Music (flujo principal)
-    console.log(`🔍 Searching ${playlistData.songs.length} songs on YouTube Music...`);
-    const songsWithVideoIds = await youtubeMusicService.searchMultipleTracks(playlistData.songs);
-    const foundYTSongs = songsWithVideoIds.filter(song => song.youtubeMusic !== null);
+    console.log(
+      `🔍 Searching ${playlistData.songs.length} songs on YouTube Music...`
+    );
+    const songsWithVideoIds = await youtubeMusicService.searchMultipleTracks(
+      playlistData.songs
+    );
+    const foundYTSongs = songsWithVideoIds.filter(
+      (song) => song.youtubeMusic !== null
+    );
 
     if (foundYTSongs.length === 0) {
       return res.status(404).json({
         status: RESPONSE_STATUS.ERROR,
-        message: ERROR_MESSAGES.YOUTUBE_SEARCH_FAILED
+        message: ERROR_MESSAGES.YOUTUBE_SEARCH_FAILED,
       });
     }
 
@@ -57,19 +89,32 @@ export async function getPlaylist(req, res) {
       try {
         console.log("🚀 Starting Spotify playlist creation process...");
         // 4.1. Buscar tracks en Spotify
-        const spotifyResults = await searchMultipleSpotifyTracks(spotifyAccessToken, playlistData.songs);
-        const foundSpotifyTracks = spotifyResults.filter(song => song.found);
+        const spotifyResults = await searchMultipleSpotifyTracks(
+          spotifyAccessToken,
+          playlistData.songs
+        );
+        const foundSpotifyTracks = spotifyResults.filter((song) => song.found);
 
         if (foundSpotifyTracks.length > 0) {
           // 4.2. Obtener perfil del usuario
           const userProfile = await getSpotifyUserProfile(spotifyAccessToken);
 
           // 4.3. Crear la playlist
-          const newSpotifyPlaylist = await createSpotifyPlaylist(spotifyAccessToken, userProfile.id, playlistData.title, playlistData.description, true); // Pública
+          const newSpotifyPlaylist = await createSpotifyPlaylist(
+            spotifyAccessToken,
+            userProfile.id,
+            playlistData.title,
+            playlistData.description,
+            true
+          ); // Pública
 
           // 4.4. Añadir tracks a la playlist
-          const trackUris = foundSpotifyTracks.map(song => song.uri);
-          await addTracksToSpotifyPlaylist(spotifyAccessToken, newSpotifyPlaylist.id, trackUris);
+          const trackUris = foundSpotifyTracks.map((song) => song.uri);
+          await addTracksToSpotifyPlaylist(
+            spotifyAccessToken,
+            newSpotifyPlaylist.id,
+            trackUris
+          );
 
           spotifyPlaylistData = {
             id: newSpotifyPlaylist.id,
@@ -78,12 +123,19 @@ export async function getPlaylist(req, res) {
             tracksAdded: foundSpotifyTracks.length,
             totalRequested: playlistData.songs.length,
           };
-          console.log(`✅ Spotify playlist created successfully: ${newSpotifyPlaylist.external_urls.spotify}`);
+          console.log(
+            `✅ Spotify playlist created successfully: ${newSpotifyPlaylist.external_urls.spotify}`
+          );
         } else {
-          console.warn("⚠️ No songs found on Spotify. Skipping playlist creation.");
+          console.warn(
+            "⚠️ No songs found on Spotify. Skipping playlist creation."
+          );
         }
       } catch (spotifyError) {
-        console.error("❌ Spotify playlist creation failed:", spotifyError.message);
+        console.error(
+          "❌ Spotify playlist creation failed:",
+          spotifyError.message
+        );
         // No detenemos el flujo, solo logueamos el error. El usuario aún recibirá su playlist de YT Music.
       }
     }
@@ -95,7 +147,7 @@ export async function getPlaylist(req, res) {
       description: playlistData.description,
       totalSongs: foundYTSongs.length,
       originalSongsCount: playlistData.songs.length,
-      songs: foundYTSongs.map(song => ({
+      songs: foundYTSongs.map((song) => ({
         title: song.youtubeMusic.title,
         artist: song.youtubeMusic.artist,
         duration: song.youtubeMusic.duration,
@@ -103,7 +155,7 @@ export async function getPlaylist(req, res) {
         playbackUrl: song.youtubeMusic.playbackUrl,
         thumbnails: song.youtubeMusic.thumbnails,
         originalTitle: song.title,
-        originalArtist: song.artist
+        originalArtist: song.artist,
       })),
       createdAt: new Date().toISOString(),
       spotify: spotifyPlaylistData,
@@ -121,7 +173,7 @@ export async function getPlaylist(req, res) {
           description: finalPlaylist.description,
           emotion: detectEmotion(userDescription), // Función helper para detectar emoción
           language: language,
-          songs: finalPlaylist.songs.map(song => ({
+          songs: finalPlaylist.songs.map((song) => ({
             title: song.title,
             artist: song.artist,
             duration: song.duration,
@@ -130,48 +182,56 @@ export async function getPlaylist(req, res) {
             thumbnails: song.thumbnails,
             originalTitle: song.originalTitle,
             originalArtist: song.originalArtist,
-            spotifyUri: null // Se puede actualizar después
+            spotifyUri: null, // Se puede actualizar después
           })),
           originalSongsCount: finalPlaylist.originalSongsCount,
           userId: null, // Se asignará cuando el usuario se loguee
-          sessionId: req.headers['x-session-id'] || null, // Para usuarios no logueados
-          generatedWith: spotifyPlaylistData ? 'spotify_validated' : 'ai_only',
+          sessionId: req.headers["x-session-id"] || null, // Para usuarios no logueados
+          generatedWith: spotifyPlaylistData ? "spotify_validated" : "ai_only",
           spotifyPlaylistId: spotifyPlaylistData?.id || null,
           spotifyPlaylistUrl: spotifyPlaylistData?.url || null,
-          spotifyCreatedAt: spotifyPlaylistData ? new Date() : null
+          spotifyCreatedAt: spotifyPlaylistData ? new Date() : null,
         });
 
         await playlistToSave.save();
         savedToDatabase = true;
-        
+
         // Actualizar el ID para que coincida con MongoDB
         finalPlaylist.mongoId = playlistToSave._id.toString();
-        
+
         console.log(`💾 Playlist guardada en MongoDB: ${playlistToSave._id}`);
       } catch (dbError) {
-        console.error('Error guardando en MongoDB:', dbError.message);
+        console.error("Error guardando en MongoDB:", dbError.message);
         // No interrumpir el flujo, solo logguear
       }
     }
 
     // 7. Determinar status de la respuesta
-    const responseStatus = foundYTSongs.length === playlistData.songs.length ? RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.PARTIAL;
+    const responseStatus =
+      foundYTSongs.length === playlistData.songs.length
+        ? RESPONSE_STATUS.SUCCESS
+        : RESPONSE_STATUS.PARTIAL;
 
-    console.log(`✅ Playlist generated successfully: ${foundYTSongs.length}/${playlistData.songs.length} songs found`);
+    console.log(
+      `✅ Playlist generated successfully: ${foundYTSongs.length}/${playlistData.songs.length} songs found`
+    );
 
     res.json({
       status: responseStatus,
-      message: responseStatus === RESPONSE_STATUS.SUCCESS ? "Playlist generada exitosamente" : `Playlist generada parcialmente: ${foundYTSongs.length} de ${playlistData.songs.length} canciones encontradas`,
-      data: finalPlaylist
+      message:
+        responseStatus === RESPONSE_STATUS.SUCCESS
+          ? "Playlist generada exitosamente"
+          : `Playlist generada parcialmente: ${foundYTSongs.length} de ${playlistData.songs.length} canciones encontradas`,
+      data: finalPlaylist,
     });
-
   } catch (error) {
     console.error("Error in getPlaylist controller:", error);
     if (!res.headersSent) {
       res.status(500).json({
         status: RESPONSE_STATUS.ERROR,
         message: "Error interno del servidor",
-        error: process.env.NODE_ENV === "development" ? error.message : undefined
+        error:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
   }
@@ -187,7 +247,7 @@ export async function getPlaylistById(req, res) {
     if (!playlistId) {
       return res.status(400).json({
         status: RESPONSE_STATUS.ERROR,
-        message: "ID de playlist requerido"
+        message: "ID de playlist requerido",
       });
     }
 
@@ -196,22 +256,21 @@ export async function getPlaylistById(req, res) {
     if (!playlist) {
       return res.status(404).json({
         status: RESPONSE_STATUS.ERROR,
-        message: "Playlist no encontrada o expirada"
+        message: "Playlist no encontrada o expirada",
       });
     }
 
     res.json({
       status: RESPONSE_STATUS.SUCCESS,
       message: "Playlist encontrada",
-      data: playlist
+      data: playlist,
     });
-
   } catch (error) {
     console.error("Error in getPlaylistById controller:", error);
     res.status(500).json({
       status: RESPONSE_STATUS.ERROR,
       message: "Error interno del servidor",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 }
@@ -226,38 +285,43 @@ export async function validateSpotifySongs(req, res) {
     if (!songs || !Array.isArray(songs) || songs.length === 0) {
       return res.status(400).json({
         status: RESPONSE_STATUS.ERROR,
-        message: "Lista de canciones requerida"
+        message: "Lista de canciones requerida",
       });
     }
 
     console.log(`🎵 Validating ${songs.length} songs in Spotify...`);
 
     // Buscar canciones en Spotify
-    const spotifyResults = await searchMultipleSpotifyTracks(spotifyAccessToken, songs);
-    
-    const foundSongs = spotifyResults.filter(song => song.found);
-    const notFoundSongs = spotifyResults.filter(song => !song.found);
+    const spotifyResults = await searchMultipleSpotifyTracks(
+      spotifyAccessToken,
+      songs
+    );
 
-    console.log(`✅ Spotify validation complete: ${foundSongs.length}/${songs.length} songs found`);
+    const foundSongs = spotifyResults.filter((song) => song.found);
+    const notFoundSongs = spotifyResults.filter((song) => !song.found);
+
+    console.log(
+      `✅ Spotify validation complete: ${foundSongs.length}/${songs.length} songs found`
+    );
 
     res.json({
-      status: foundSongs.length > 0 ? RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.ERROR,
+      status:
+        foundSongs.length > 0 ? RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.ERROR,
       message: `${foundSongs.length} de ${songs.length} canciones encontradas en Spotify`,
       data: {
         found: foundSongs,
         notFound: notFoundSongs,
         totalRequested: songs.length,
         totalFound: foundSongs.length,
-        successRate: (foundSongs.length / songs.length * 100).toFixed(1)
-      }
+        successRate: ((foundSongs.length / songs.length) * 100).toFixed(1),
+      },
     });
-
   } catch (error) {
     console.error("Error in validateSpotifySongs controller:", error);
     res.status(500).json({
       status: RESPONSE_STATUS.ERROR,
       message: ERROR_MESSAGES.SPOTIFY_SEARCH_FAILED,
-      error: process.env.NODE_ENV === "development" ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 }
@@ -278,16 +342,15 @@ export async function getSystemStats(req, res) {
         cache: cacheStats,
         uptime: process.uptime(),
         memory: process.memoryUsage(),
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     });
-
   } catch (error) {
     console.error("Error in getSystemStats controller:", error);
     res.status(500).json({
       status: RESPONSE_STATUS.ERROR,
       message: "Error obteniendo estadísticas",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 }
@@ -297,24 +360,80 @@ export async function getSystemStats(req, res) {
  */
 function detectEmotion(userDescription) {
   const description = userDescription.toLowerCase();
-  
+
   // Patrones de palabras clave para cada emoción
   const emotionPatterns = {
-    angry: ['enojado', 'angry', 'furioso', 'rabia', 'ira', 'molesto', 'agresivo', 'irritado'],
-    happy: ['feliz', 'happy', 'alegre', 'contento', 'eufórico', 'celebrar', 'fiesta', 'diversión', 'joy'],
-    sleep: ['dormir', 'sleep', 'relajar', 'calma', 'tranquilo', 'descanso', 'paz', 'meditation', 'chill'],
-    magic: ['mágico', 'magic', 'místico', 'fantástico', 'épico', 'aventura', 'maravilla', 'encanto'],
-    sad: ['triste', 'sad', 'melancólico', 'llorar', 'deprimido', 'nostalgia', 'pena', 'dolor'],
-    party: ['fiesta', 'party', 'bailar', 'dance', 'celebración', 'energético', 'activo', 'upbeat']
+    angry: [
+      "enojado",
+      "angry",
+      "furioso",
+      "rabia",
+      "ira",
+      "molesto",
+      "agresivo",
+      "irritado",
+    ],
+    happy: [
+      "feliz",
+      "happy",
+      "alegre",
+      "contento",
+      "eufórico",
+      "celebrar",
+      "fiesta",
+      "diversión",
+      "joy",
+    ],
+    sleep: [
+      "dormir",
+      "sleep",
+      "relajar",
+      "calma",
+      "tranquilo",
+      "descanso",
+      "paz",
+      "meditation",
+      "chill",
+    ],
+    magic: [
+      "mágico",
+      "magic",
+      "místico",
+      "fantástico",
+      "épico",
+      "aventura",
+      "maravilla",
+      "encanto",
+    ],
+    sad: [
+      "triste",
+      "sad",
+      "melancólico",
+      "llorar",
+      "deprimido",
+      "nostalgia",
+      "pena",
+      "dolor",
+    ],
+    party: [
+      "fiesta",
+      "party",
+      "bailar",
+      "dance",
+      "celebración",
+      "energético",
+      "activo",
+      "upbeat",
+    ],
   };
-  
+
   // Buscar matches en la descripción
   for (const [emotion, keywords] of Object.entries(emotionPatterns)) {
-    if (keywords.some(keyword => description.includes(keyword))) {
+    if (keywords.some((keyword) => description.includes(keyword))) {
       return emotion;
     }
   }
-  
+
   // Si no encuentra match, retornar 'other'
-  return 'other';
-} 
+  return "other";
+}
