@@ -1,4 +1,4 @@
-export const GEMINI_TEXT_MODEL_NAME = "gemini-1.5-flash";
+export const GEMINI_TEXT_MODEL_NAME = "gemini-2.0-flash-lite";
 export const SPOTIFY_API_BASE_URL = "https://api.spotify.com/v1";
 export const YOUTUBE_MUSIC_BASE_URL = "https://music.youtube.com";
 

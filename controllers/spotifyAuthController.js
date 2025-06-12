@@ -1,7 +1,6 @@
 import axios from "axios";
 import crypto from "crypto";
 import querystring from "querystring";
-import ENV_CONFIG from "../config/environment.js";
 
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
@@ -23,6 +22,9 @@ function generateRandomString(length) {
 // Inicia el flujo de autorización (redirección a Spotify)
 export const initiateLogin = async (req, res) => {
   try {
+    // Cargar configuración dinámicamente
+    const ENV_CONFIG = (await import("../config/environment.js")).default;
+    
     const clientId = ENV_CONFIG.SPOTIFY_CLIENT_ID;
     if (!clientId) {
       return res.status(500).json({
@@ -30,15 +32,17 @@ export const initiateLogin = async (req, res) => {
       });
     }
 
-    // Spotify debe redirigir al frontend, no al backend
-    const redirect_uri = `${ENV_CONFIG.FRONTEND_URL}/callback`;
+    // El redirect_uri DEBE apuntar al backend para que reciba el código de Spotify.
+    // Usar la configuración centralizada que detecta automáticamente el entorno
+    const redirect_uri = `${ENV_CONFIG.BACKEND_URL}/api/spotify/callback`;
 
     // Log para debugging
     console.log('🎵 Spotify Auth - Iniciando login:', {
       environment: ENV_CONFIG.NODE_ENV,
       backendUrl: ENV_CONFIG.BACKEND_URL,
       redirect_uri,
-      clientId: clientId ? 'configured' : 'missing'
+      clientId: clientId ? 'configured' : 'missing',
+      isDevelopment: ENV_CONFIG.isDevelopment
     });
 
     const state = generateRandomString(16);
@@ -85,8 +89,8 @@ export const initiateLogin = async (req, res) => {
     res.redirect(authUrl.toString());
   } catch (error) {
     console.error("Error iniciando autenticación con Spotify:", error);
-    // Evitar enviar una respuesta JSON aquí. Si la redirección falla,
-    // es mejor redirigir a una página de error del frontend.
+    // Cargar configuración dinámicamente para el manejo de errores
+    const ENV_CONFIG = (await import("../config/environment.js")).default;
     res.redirect(
       `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=login_initiation_failed`
     );
@@ -97,25 +101,32 @@ export const initiateLogin = async (req, res) => {
 export const handleCallback = async (req, res) => {
   const { code, state, error } = req.query;
 
-  console.log('🎵 Spotify Auth - Callback:', {
-    environment: ENV_CONFIG.NODE_ENV,
-    frontendUrl: ENV_CONFIG.FRONTEND_URL,
-    hasCode: !!code,
-    hasState: !!state,
-    hasError: !!error
-  });
-
   try {
+    // Cargar configuración dinámicamente
+    const ENV_CONFIG = (await import("../config/environment.js")).default;
+
+    // URL del frontend para las redirecciones finales usando configuración centralizada
+    const frontendUrl = ENV_CONFIG.FRONTEND_URL;
+
+    console.log('🎵 Spotify Auth - Callback recibido:', {
+      environment: ENV_CONFIG.NODE_ENV,
+      frontendUrl: frontendUrl,
+      hasCode: !!code,
+      hasState: !!state,
+      hasError: !!error,
+      isDevelopment: ENV_CONFIG.isDevelopment
+    });
+
     if (error) {
       console.error("Error en autorización de Spotify:", error);
       return res.redirect(
-        `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=${encodeURIComponent(error)}`
+        `${frontendUrl}/auth-error?error=${encodeURIComponent(error)}`
       );
     }
 
     if (!state || !stateStore.has(state)) {
       console.error("Estado inválido o expirado:", state);
-      return res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-error?error=invalid_state`);
+      return res.redirect(`${frontendUrl}/auth-error?error=invalid_state`);
     }
 
     const { redirect_uri } = stateStore.get(state);
@@ -123,7 +134,7 @@ export const handleCallback = async (req, res) => {
 
     if (!code) {
       console.error("Código de autorización faltante");
-      return res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-error?error=missing_code`);
+      return res.redirect(`${frontendUrl}/auth-error?error=missing_code`);
     }
 
     const clientId = ENV_CONFIG.SPOTIFY_CLIENT_ID;
@@ -132,7 +143,7 @@ export const handleCallback = async (req, res) => {
     if (!clientId || !clientSecret) {
       console.error("Credenciales de Spotify no configuradas");
       return res.redirect(
-        `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=server_configuration`
+        `${frontendUrl}/auth-error?error=server_configuration`
       );
     }
 
@@ -171,7 +182,7 @@ export const handleCallback = async (req, res) => {
     };
 
     const tokenString = encodeURIComponent(JSON.stringify(tokenData));
-    res.redirect(`${ENV_CONFIG.FRONTEND_URL}/auth-success#data=${tokenString}`);
+    res.redirect(`${frontendUrl}/auth-success#data=${tokenString}`);
   } catch (err) {
     console.error("Error procesando callback de Spotify:", err.response ? err.response.data : err.message);
 
@@ -180,6 +191,8 @@ export const handleCallback = async (req, res) => {
       errorMessage = err.response.data?.error_description || err.response.data?.error || "token_exchange_failed";
     }
 
+    // Cargar configuración dinámicamente para el manejo de errores
+    const ENV_CONFIG = (await import("../config/environment.js")).default;
     res.redirect(
       `${ENV_CONFIG.FRONTEND_URL}/auth-error?error=${encodeURIComponent(errorMessage)}`
     );
@@ -189,6 +202,9 @@ export const handleCallback = async (req, res) => {
 // Refrescar token de acceso
 export const refreshAccessToken = async (req, res) => {
   try {
+    // Cargar configuración dinámicamente
+    const ENV_CONFIG = (await import("../config/environment.js")).default;
+    
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
@@ -281,4 +297,4 @@ export const validateToken = async (req, res) => {
       error: 'Error interno del servidor al validar token'
     });
   }
-}; 
+};

@@ -1,17 +1,17 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
-import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
 
-// Importar rutas
 import playlistRoutes from "./routes/playlistRoutes.js";
 import spotifyRoutes from "./routes/spotifyRoutes.js";
 import spotifyAuthRoutes from "./routes/spotifyAuth.js";
 
-// Importar middleware
 import {
   generalLimiter,
   playlistGenerationLimiter,
@@ -20,41 +20,52 @@ import {
 } from "./middleware/rateLimiter.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
-// Importar constantes y configuración
-import { RESPONSE_STATUS } from "./config/constants.js";
-
-// Importar configuración de base de datos
-import { initializeDatabase } from "./config/database.js";
-
-// Cargar variables de entorno
-dotenv.config();
+let RESPONSE_STATUS;
+let initializeDatabase;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== MIDDLEWARES DE SEGURIDAD Y CONFIGURACIÓN =====
+function validateEnvironment() {
+  const requiredVariables = [
+    "SPOTIFY_CLIENT_ID",
+    "SPOTIFY_CLIENT_SECRET",
+    "FRONTEND_URL",
+    "MONGODB_URI", // Ejemplo, agrega tus variables de base de datos
+  ];
 
-// Helmet para headers de seguridad
+  const missingVariables = requiredVariables.filter(
+    (variable) => !process.env[variable]
+  );
+
+  if (missingVariables.length > 0) {
+    console.error(
+      "Error: Las siguientes variables de entorno no están definidas:",
+      missingVariables.join(", ")
+    );
+    process.exit(1);
+  }
+
+  console.log("✅ Variables de entorno validadas.");
+}
+
+validateEnvironment();
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
 
-// Compresión gzip
 app.use(compression());
 
-// CORS configurado
 const corsOptions = {
   origin: [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://emotionquest-backend-189934902436.us-central1.run.app",
-    "https://emotionquest.vercel.app/",
     "https://emotionquest.vercel.app",
-    "https://emotionquest-git-master-pixeldroid19s-projects.vercel.app/",
     "https://emotionquest-git-master-pixeldroid19s-projects.vercel.app",
-    "https://emotionquest-o20f2c1qg-pixeldroid19s-projects.vercel.app/",
     "https://emotionquest-o20f2c1qg-pixeldroid19s-projects.vercel.app",
     process.env.FRONTEND_URL,
   ].filter(Boolean),
@@ -65,7 +76,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Parsing de JSON con límite de tamaño
 app.use(
   express.json({
     limit: "10mb",
@@ -79,19 +89,16 @@ app.use(
   })
 );
 
-// Logging con Morgan
 if (process.env.NODE_ENV === "production") {
   app.use(morgan("combined"));
 } else {
   app.use(morgan("dev"));
 }
 
-// Rate limiting general
 app.use(generalLimiter);
 
-// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: {
     status: "error",
@@ -100,49 +107,42 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ===== RUTAS DE SALUD Y INFO =====
-
-app.get("/", (req, res) => {
-  res.json({
-    status: RESPONSE_STATUS.SUCCESS,
-    message: "🎼 Music App Backend - API de Música Clásica",
-    version: "1.0.0",
-    endpoints: {
-      playlists: "/api/playlists",
-      spotify: "/api/spotify",
-      health: "/health",
-      docs: "/api-docs",
-    },
-    timestamp: new Date().toISOString(),
+function setupRoutes() {
+  app.get("/", (req, res) => {
+    res.json({
+      status: RESPONSE_STATUS.SUCCESS,
+      message: "🎼 Music App Backend - API de Música Clásica",
+      version: "1.0.0",
+      endpoints: {
+        playlists: "/api/playlists",
+        spotify: "/api/spotify",
+        health: "/health",
+        docs: "/api-docs",
+      },
+      timestamp: new Date().toISOString(),
+    });
   });
-});
 
-app.get("/health", (req, res) => {
-  res.json({
-    status: RESPONSE_STATUS.SUCCESS,
-    message: "Servidor funcionando correctamente",
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    env: process.env.NODE_ENV || "development",
-    timestamp: new Date().toISOString(),
+  app.get("/health", (req, res) => {
+    res.json({
+      status: RESPONSE_STATUS.SUCCESS,
+      message: "Servidor funcionando correctamente",
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      env: process.env.NODE_ENV || "development",
+      timestamp: new Date().toISOString(),
+    });
   });
-});
+}
 
-// ===== RUTAS PRINCIPALES =====
-
-// Rutas de playlists con rate limiting específico
 app.use("/api/playlists/generate", playlistGenerationLimiter);
 app.use("/api/playlists/system/stats", playlistRetrievalLimiter);
 app.use("/api/playlists/:playlistId", playlistRetrievalLimiter);
 app.use("/api/playlists", playlistRoutes);
 
-// Rutas de Spotify con rate limiting específico
 app.use("/api/spotify", spotifyLimiter, spotifyRoutes);
 
-// Rutas de autenticación de Spotify
 app.use("/api/spotify", spotifyAuthRoutes);
-
-// ===== DOCUMENTACIÓN SIMPLE DE LA API =====
 
 app.get("/api-docs", (req, res) => {
   res.json({
@@ -244,72 +244,65 @@ app.get("/api-docs", (req, res) => {
   });
 });
 
-// ===== MANEJO DE ERRORES =====
-
-// Middleware para rutas no encontradas
 app.use(notFoundHandler);
 
-// Middleware global de manejo de errores
 app.use(errorHandler);
 
-// ===== INICIO DEL SERVIDOR =====
-
-// Función para inicializar servicios
 async function initializeServices() {
   try {
-    console.log("🔧 Initializing services...");
+    const { RESPONSE_STATUS: ResponseStatus } = await import(
+      "./config/constants.js"
+    );
+    const { initializeDatabase: initDB } = await import("./config/database.js");
 
-    // Inicializar YouTube Music service
+    RESPONSE_STATUS = ResponseStatus;
+    initializeDatabase = initDB;
+
+    setupRoutes();
+
     const { youtubeMusicService } = await import(
       "./services/youtubeMusicService.js"
     );
     await youtubeMusicService.initialize();
 
-    // Inicializar base de datos
-    console.log("🔄 Inicializando base de datos...");
     await initializeDatabase();
-
-    console.log("✅ All services initialized successfully");
   } catch (error) {
-    console.error("❌ Error initializing services:", error);
+    console.error("Error initializing services:", error);
     process.exit(1);
   }
 }
 
-// Manejar shutdown graceful
 process.on("SIGTERM", () => {
-  console.log("🛑 SIGTERM received, shutting down gracefully");
+  console.log("SIGTERM received, shutting down gracefully");
   process.exit(0);
 });
 
 process.on("SIGINT", () => {
-  console.log("🛑 SIGINT received, shutting down gracefully");
+  console.log("SIGINT received, shutting down gracefully");
   process.exit(0);
 });
 
-// Manejar errores no capturados
 process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error);
+  console.error("Uncaught Exception:", error);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);
 });
 
-// Inicializar servicios y luego iniciar el servidor
 initializeServices()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`🎵 Music App Backend running on port ${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
-      console.log(`📡 API available at: http://localhost:${PORT}`);
-      console.log(`📚 Documentation at: http://localhost:${PORT}/api-docs`);
-      console.log(`❤️  Health check at: http://localhost:${PORT}/health`);
+      console.log(`Music App Backend running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log(`API available at: http://localhost:${PORT}`);
+      console.log(`Documentation at: http://localhost:${PORT}/api-docs`);
+      console.log(`Health check at: http://localhost:${PORT}/health`);
     });
   })
   .catch((error) => {
-    console.error("❌ Failed to start server:", error);
+    console.error("Failed to start server:", error);
     process.exit(1);
   });
