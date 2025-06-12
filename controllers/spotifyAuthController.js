@@ -30,7 +30,8 @@ export const initiateLogin = async (req, res) => {
       });
     }
 
-    const redirect_uri = `${ENV_CONFIG.BACKEND_URL}/api/spotify/callback`;
+    // Spotify debe redirigir al frontend, no al backend
+    const redirect_uri = `${ENV_CONFIG.FRONTEND_URL}/callback`;
 
     // Log para debugging
     console.log('🎵 Spotify Auth - Iniciando login:', {
