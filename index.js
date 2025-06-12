@@ -49,6 +49,7 @@ const corsOptions = {
   origin: [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://emotionquest-backend-189934902436.us-central1.run.app",
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true,
