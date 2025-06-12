@@ -52,11 +52,15 @@ const corsOptions = {
     "https://emotionquest-backend-189934902436.us-central1.run.app",
     "https://emotionquest.vercel.app/",
     "https://emotionquest.vercel.app",
-    process.env.FRONTEND_URL
+    "https://emotionquest-git-master-pixeldroid19s-projects.vercel.app/",
+    "https://emotionquest-git-master-pixeldroid19s-projects.vercel.app",
+    "https://emotionquest-o20f2c1qg-pixeldroid19s-projects.vercel.app/",
+    "https://emotionquest-o20f2c1qg-pixeldroid19s-projects.vercel.app",
+    process.env.FRONTEND_URL,
   ].filter(Boolean),
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
 };
 
 app.use(cors(corsOptions));
@@ -91,8 +95,8 @@ const limiter = rateLimit({
   max: 100,
   message: {
     status: "error",
-    message: "Demasiadas solicitudes. Intenta de nuevo en 15 minutos."
-  }
+    message: "Demasiadas solicitudes. Intenta de nuevo en 15 minutos.",
+  },
 });
 app.use(limiter);
 
@@ -202,11 +206,13 @@ app.get("/api-docs", (req, res) => {
         "GET /api/spotify/login": {
           description: "Inicia el flujo de autenticación con Spotify",
           query: {
-            redirect_uri: "string (requerido) - URL de redirección después de autenticación",
+            redirect_uri:
+              "string (requerido) - URL de redirección después de autenticación",
           },
         },
         "GET /api/spotify/callback": {
-          description: "Endpoint para recibir el callback de Spotify (uso interno)",
+          description:
+            "Endpoint para recibir el callback de Spotify (uso interno)",
         },
         "POST /api/spotify/token": {
           description: "Intercambia código de autorización por token",
