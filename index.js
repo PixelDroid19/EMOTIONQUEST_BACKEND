@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 // Importar rutas
 import playlistRoutes from "./routes/playlistRoutes.js";
 import spotifyRoutes from "./routes/spotifyRoutes.js";
+import spotifyAuthRoutes from "./routes/spotifyAuth.js";
 
 // Importar middleware
 import {
@@ -119,6 +120,9 @@ app.use("/api/playlists", playlistRoutes);
 // Rutas de Spotify con rate limiting específico
 app.use("/api/spotify", spotifyLimiter, spotifyRoutes);
 
+// Rutas de autenticación de Spotify
+app.use("/api/spotify", spotifyAuthRoutes);
+
 // ===== DOCUMENTACIÓN SIMPLE DE LA API =====
 
 app.get("/api-docs", (req, res) => {
@@ -178,6 +182,34 @@ app.get("/api-docs", (req, res) => {
           description: "Obtiene perfil del usuario de Spotify",
           body: {
             spotifyAccessToken: "string (requerido)",
+          },
+        },
+        "GET /api/spotify/login": {
+          description: "Inicia el flujo de autenticación con Spotify",
+          query: {
+            redirect_uri: "string (requerido) - URL de redirección después de autenticación",
+          },
+        },
+        "GET /api/spotify/callback": {
+          description: "Endpoint para recibir el callback de Spotify (uso interno)",
+        },
+        "POST /api/spotify/token": {
+          description: "Intercambia código de autorización por token",
+          body: {
+            code: "string (requerido) - Código de autorización",
+            redirectUri: "string (requerido) - URL de redirección usada",
+          },
+        },
+        "POST /api/spotify/refresh": {
+          description: "Refresca un token de acceso expirado",
+          body: {
+            refreshToken: "string (requerido) - Token de refresco",
+          },
+        },
+        "GET /api/spotify/validate": {
+          description: "Valida un token de acceso",
+          headers: {
+            Authorization: "string (requerido) - Bearer {token}",
           },
         },
       },

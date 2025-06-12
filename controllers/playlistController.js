@@ -1,17 +1,18 @@
 import { generateClassicalPlaylist, generateFallbackClassicalPlaylist } from "../services/aiService.js";
 import { youtubeMusicService } from "../services/youtubeMusicService.js";
-import { searchMultipleSpotifyTracks } from "../services/spotifyService.js";
+import { searchMultipleSpotifyTracks, getSpotifyUserProfile, createSpotifyPlaylist, addTracksToSpotifyPlaylist } from "../services/spotifyService.js";
 import { store } from "../config/database.js";
 import { RESPONSE_STATUS, ERROR_MESSAGES, DEFAULT_PLAYLIST_CONFIG } from "../config/constants.js";
 import crypto from "crypto";
 
 /**
- * Endpoint principal que todos los usuarios usan para obtener una playlist
- * Flujo: IA → YouTube Music → Respuesta con videoIds para reproducción
+ * Endpoint principal para obtener una playlist.
+ * Si se provee un token de Spotify, crea la playlist en la cuenta del usuario.
+ * Flujo: IA → YouTube Music → (Opcional: Spotify) → Respuesta
  */
 export async function getPlaylist(req, res) {
   try {
-    const { userDescription, language = DEFAULT_PLAYLIST_CONFIG.DEFAULT_LANGUAGE } = req.body;
+    const { userDescription, language = DEFAULT_PLAYLIST_CONFIG.DEFAULT_LANGUAGE, spotifyAccessToken } = req.body;
 
     if (!userDescription || userDescription.trim().length === 0) {
       return res.status(400).json({
@@ -21,52 +22,79 @@ export async function getPlaylist(req, res) {
     }
 
     console.log(`🎵 Processing playlist request: "${userDescription}", Language: ${language}`);
+    if (spotifyAccessToken) {
+      console.log("🔒 Spotify token provided, will attempt to create playlist.");
+    }
 
     // 1. Generar ID único para esta playlist
     const playlistId = crypto.randomUUID();
 
-    // 2. La IA genera la lista de canciones, ya ordenada lógicamente
+    // 2. La IA genera la lista de canciones
     let playlistData;
     try {
       playlistData = await generateClassicalPlaylist(userDescription.trim(), language);
     } catch (aiError) {
       console.error("AI generation failed, trying fallback:", aiError);
-      try {
-        playlistData = await generateFallbackClassicalPlaylist(userDescription.trim(), language);
-      } catch (fallbackError) {
-        console.error("Fallback generation also failed:", fallbackError);
-        return res.status(500).json({
-          status: RESPONSE_STATUS.ERROR,
-          message: ERROR_MESSAGES.AI_GENERATION_FAILED,
-          error: fallbackError.message
-        });
-      }
+      playlistData = await generateFallbackClassicalPlaylist(userDescription.trim(), language);
     }
 
-    // 3. Enriquecer la lista con videoIds de YouTube Music
+    // 3. Enriquecer con videoIds de YouTube Music (flujo principal)
     console.log(`🔍 Searching ${playlistData.songs.length} songs on YouTube Music...`);
-    
     const songsWithVideoIds = await youtubeMusicService.searchMultipleTracks(playlistData.songs);
-    
-    // Filtrar solo las canciones que se encontraron
-    const foundSongs = songsWithVideoIds.filter(song => song.youtubeMusic !== null);
-    
-    if (foundSongs.length === 0) {
+    const foundYTSongs = songsWithVideoIds.filter(song => song.youtubeMusic !== null);
+
+    if (foundYTSongs.length === 0) {
       return res.status(404).json({
         status: RESPONSE_STATUS.ERROR,
-        message: ERROR_MESSAGES.YOUTUBE_SEARCH_FAILED,
-        details: "No se encontraron canciones en YouTube Music"
+        message: ERROR_MESSAGES.YOUTUBE_SEARCH_FAILED
       });
     }
 
-    // 4. Formato final para el frontend
+    // 4. (Opcional) Crear playlist en Spotify si hay token
+    let spotifyPlaylistData = null;
+    if (spotifyAccessToken) {
+      try {
+        console.log("🚀 Starting Spotify playlist creation process...");
+        // 4.1. Buscar tracks en Spotify
+        const spotifyResults = await searchMultipleSpotifyTracks(spotifyAccessToken, playlistData.songs);
+        const foundSpotifyTracks = spotifyResults.filter(song => song.found);
+
+        if (foundSpotifyTracks.length > 0) {
+          // 4.2. Obtener perfil del usuario
+          const userProfile = await getSpotifyUserProfile(spotifyAccessToken);
+
+          // 4.3. Crear la playlist
+          const newSpotifyPlaylist = await createSpotifyPlaylist(spotifyAccessToken, userProfile.id, playlistData.title, playlistData.description, true); // Pública
+
+          // 4.4. Añadir tracks a la playlist
+          const trackUris = foundSpotifyTracks.map(song => song.uri);
+          await addTracksToSpotifyPlaylist(spotifyAccessToken, newSpotifyPlaylist.id, trackUris);
+
+          spotifyPlaylistData = {
+            id: newSpotifyPlaylist.id,
+            name: newSpotifyPlaylist.name,
+            url: newSpotifyPlaylist.external_urls.spotify,
+            tracksAdded: foundSpotifyTracks.length,
+            totalRequested: playlistData.songs.length,
+          };
+          console.log(`✅ Spotify playlist created successfully: ${newSpotifyPlaylist.external_urls.spotify}`);
+        } else {
+          console.warn("⚠️ No songs found on Spotify. Skipping playlist creation.");
+        }
+      } catch (spotifyError) {
+        console.error("❌ Spotify playlist creation failed:", spotifyError.message);
+        // No detenemos el flujo, solo logueamos el error. El usuario aún recibirá su playlist de YT Music.
+      }
+    }
+
+    // 5. Formato final para el frontend
     const finalPlaylist = {
       id: playlistId,
       title: playlistData.title,
       description: playlistData.description,
-      totalSongs: foundSongs.length,
+      totalSongs: foundYTSongs.length,
       originalSongsCount: playlistData.songs.length,
-      songs: foundSongs.map(song => ({
+      songs: foundYTSongs.map(song => ({
         title: song.youtubeMusic.title,
         artist: song.youtubeMusic.artist,
         duration: song.youtubeMusic.duration,
@@ -76,33 +104,33 @@ export async function getPlaylist(req, res) {
         originalTitle: song.title,
         originalArtist: song.artist
       })),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      spotify: spotifyPlaylistData,
     };
 
-    // 5. Almacenar en cache para futuras referencias
+    // 6. Almacenar en cache
     store.storePlaylist(playlistId, finalPlaylist);
 
-    // 6. Determinar el status de la respuesta
-    const responseStatus = foundSongs.length === playlistData.songs.length ? 
-      RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.PARTIAL;
+    // 7. Determinar status de la respuesta
+    const responseStatus = foundYTSongs.length === playlistData.songs.length ? RESPONSE_STATUS.SUCCESS : RESPONSE_STATUS.PARTIAL;
 
-    console.log(`✅ Playlist generated successfully: ${foundSongs.length}/${playlistData.songs.length} songs found`);
+    console.log(`✅ Playlist generated successfully: ${foundYTSongs.length}/${playlistData.songs.length} songs found`);
 
     res.json({
       status: responseStatus,
-      message: responseStatus === RESPONSE_STATUS.SUCCESS ? 
-        "Playlist generada exitosamente" : 
-        `Playlist generada parcialmente: ${foundSongs.length} de ${playlistData.songs.length} canciones encontradas`,
+      message: responseStatus === RESPONSE_STATUS.SUCCESS ? "Playlist generada exitosamente" : `Playlist generada parcialmente: ${foundYTSongs.length} de ${playlistData.songs.length} canciones encontradas`,
       data: finalPlaylist
     });
 
   } catch (error) {
     console.error("Error in getPlaylist controller:", error);
-    res.status(500).json({
-      status: RESPONSE_STATUS.ERROR,
-      message: "Error interno del servidor",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        status: RESPONSE_STATUS.ERROR,
+        message: "Error interno del servidor",
+        error: process.env.NODE_ENV === "development" ? error.message : undefined
+      });
+    }
   }
 }
 

@@ -75,11 +75,24 @@ CORS_ORIGIN=http://localhost:3000,http://localhost:5173
 2. Crea un proyecto y obtén tu API key
 3. Agrega la key a `GOOGLE_API_KEY` en tu `.env`
 
-#### Spotify (Opcional)
-1. Ve a [Spotify for Developers](https://developer.spotify.com/dashboard/applications)
-2. Crea una nueva aplicación
-3. Obtén `Client ID` y `Client Secret`
-4. Agrégalos a tu `.env`
+#### Spotify (Requerido para autenticación)
+1. Ve a [Spotify for Developers](https://developer.spotify.com/dashboard)
+2. Inicia sesión o crea una cuenta
+3. Crea una nueva aplicación: "Create App"
+4. Completa el formulario con la siguiente información:
+   - App name: (nombre de tu aplicación)
+   - App description: (breve descripción)
+   - Website: `http://localhost:5173` (en desarrollo)
+   - Redirect URI: `http://localhost:5173/callback`
+   - Agrega también: `http://127.0.0.1:5173/callback` como URI adicional
+5. Acepta los términos y crea la aplicación
+6. Haz clic en "Settings" para ver los detalles de la aplicación
+7. Obtén el `Client ID` y `Client Secret`
+8. Agrégalos a tu archivo `.env`:
+   ```
+   SPOTIFY_CLIENT_ID=tu_client_id_aqui
+   SPOTIFY_CLIENT_SECRET=tu_client_secret_aqui
+   ```
 
 ### 4. Ejecutar el servidor
 
@@ -179,6 +192,30 @@ Obtiene el perfil del usuario de Spotify.
 - **Generación de Playlists**: 10 requests / 5 minutos
 - **Operaciones Spotify**: 15 requests / 2 minutos
 - **Consultas**: 50 requests / 1 minuto
+
+## 🔐 Autenticación con Spotify
+
+El sistema implementa el flujo OAuth 2.0 Authorization Code Flow para autenticación con Spotify:
+
+1. **Endpoints de autenticación**:
+   - `GET /api/spotify/login` - Inicia el flujo de autenticación
+   - `GET /api/spotify/callback` - Procesa la respuesta de Spotify
+   - `POST /api/spotify/token` - Intercambia código por token
+   - `POST /api/spotify/refresh` - Refresca token expirado
+   - `GET /api/spotify/validate` - Valida un token existente
+
+2. **Flujo de autenticación**:
+   - Usuario hace clic en "Conectar con Spotify"
+   - Backend redirecciona a Spotify para autorización
+   - Spotify redirecciona de vuelta con código
+   - Backend intercambia código por token
+   - Token se almacena en el frontend para peticiones a Spotify
+
+3. **Seguridad**:
+   - Implementa validación de estado (state) para prevenir CSRF
+   - Client Secret se mantiene solo en el backend
+   - Tokens son transmitidos de forma segura mediante hash fragments
+   - Implementa manejo de errores y recuperación
 
 ## 🎯 Estados de Ánimo Soportados
 
